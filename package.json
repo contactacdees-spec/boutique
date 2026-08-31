@@ -1,0 +1,14 @@
+{
+  "name": "boutique-ts",
+  "version": "1.0.0",
+  "description": "Boutique TS — Caisse + application Scan pour la vente, centralisées sur un seul serveur.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "UNLICENSED",
+  "private": true
+}

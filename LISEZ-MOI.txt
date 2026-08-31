@@ -1,0 +1,141 @@
+========================================================
+   BOUTIQUE TS — Caisse + Scan Vente (guide rapide)
+========================================================
+
+CE QUE FAIT CE LOGICIEL
+------------------------
+Boutique TS a maintenant DEUX interfaces qui partagent la MÊME base
+de données, centralisée sur un seul serveur :
+
+  1. CAISSE (public/caisse.html)
+     Le poste principal : ventes, achats en gros, stock, dépenses,
+     caisse, rapports mensuels/annuels, étiquettes code-barres/QR
+     imprimables. Protégé par identifiant + mot de passe.
+
+  2. SCAN VENTE (public/scan.html)
+     L'application du téléphone PERSONNEL de la commerciale : elle
+     scanne le QR d'un article et enregistre la vente en un geste.
+     Cette vente arrive DIRECTEMENT dans la base de la Caisse — ce
+     n'est pas une synchronisation différée, c'est la même base de
+     données. Cette app n'a accès ni aux finances, ni aux réglages,
+     ni à la suppression : uniquement à la vente.
+
+Avant, tout était stocké dans le navigateur (localStorage) : chaque
+appareil avait sa propre copie et rien n'était vraiment partagé.
+Maintenant, un vrai petit serveur (server.js, sans aucune dépendance
+à installer) conserve un seul fichier data.json qui fait foi pour
+tout le monde.
+
+
+DÉMARRER LE SERVEUR
+--------------------
+Il faut Node.js installé (https://nodejs.org, version 16 ou plus).
+
+  Windows   : double-cliquez sur demarrer.bat
+  Mac/Linux : ouvrez un terminal dans ce dossier et lancez ./demarrer.sh
+              (ou : node server.js)
+
+Le terminal affiche l'adresse à ouvrir, en général :
+  http://localhost:3000
+
+Cette adresse ouvre la page d'accueil avec deux cartes : "Caisse" et
+"Scan Vente".
+
+
+PREMIÈRE UTILISATION
+---------------------
+1. Sur l'ordinateur/tablette de la boutique, ouvrez /caisse.html
+2. Créez votre identifiant, votre mot de passe, et un CODE SECRET DE
+   SUPPRESSION (différent du mot de passe). Ce code sera exigé à
+   chaque suppression d'une vente, d'un achat ou d'un article — il
+   n'est plus jamais réaffiché ensuite. Notez-le en lieu sûr.
+3. Ajoutez vos premiers articles dans "Articles & Stock".
+4. Ouvrez ⚙️ (Sécurité & appareils) : vous y trouverez le JETON DE
+   JUMELAGE de l'app Scan (8 caractères) et son QR.
+
+
+JUMELER LE TÉLÉPHONE DE LA COMMERCIALE
+----------------------------------------
+1. Assurez-vous que le téléphone est sur le MÊME réseau Wi-Fi que
+   l'ordinateur qui fait tourner le serveur (sauf si vous avez publié
+   le serveur en ligne, voir plus bas).
+2. Sur le téléphone, ouvrez un navigateur à l'adresse du serveur,
+   suivie de /scan.html — par exemple :
+   http://192.168.1.20:3000/scan.html
+   (l'adresse IP exacte de l'ordinateur s'affiche aussi dans le
+   terminal au démarrage du serveur, ou dans Réglages Wi-Fi)
+3. Entrez le jeton à 8 caractères (ou faites scanner le QR affiché
+   dans ⚙️ Sécurité avec l'appareil photo du téléphone).
+4. C'est fait : le téléphone peut scanner des produits et enregistrer
+   des ventes qui apparaissent aussitôt dans la Caisse.
+
+Astuce : sur le téléphone, utilisez "Ajouter à l'écran d'accueil"
+(Safari/Chrome) pour avoir une icône comme une vraie application.
+
+
+CODES-BARRES ET QR DES PRODUITS
+----------------------------------
+Chaque article a un code unique. Dans "Articles & Stock", le bouton
+🏷️ génère une étiquette imprimable (code-barres + QR) ; le bouton
+"Imprimer les étiquettes" permet d'imprimer plusieurs étiquettes à la
+fois. C'est ce QR que le téléphone de la commerciale scanne pour
+retrouver l'article et enregistrer la vente.
+
+
+SI LE TÉLÉPHONE N'A PAS ACCÈS À LA CAMÉRA
+--------------------------------------------
+L'app Scan propose aussi une saisie manuelle du code, et fonctionne
+avec une douchette USB/Bluetooth (elle "tape" le code comme un
+clavier). Aucune fonctionnalité n'est bloquée sans caméra.
+
+
+UTILISER LE SCAN SANS RÉSEAU (Wi-Fi instable)
+-------------------------------------------------
+Si le téléphone perd la connexion en pleine vente, celle-ci est mise
+en attente localement sur le téléphone et envoyée automatiquement dès
+que la connexion revient (bandeau "en attente d'envoi" visible sur
+l'écran d'accueil de l'app Scan).
+
+
+SAUVEGARDES
+------------
+Une copie de data.json est faite automatiquement chaque jour dans le
+dossier sauvegardes/. Pensez en plus à copier ce fichier ailleurs de
+temps en temps (clé USB, cloud...).
+
+
+MOT DE PASSE OU CODE DE SUPPRESSION PERDU
+---------------------------------------------
+Ni le mot de passe ni le code de suppression ne sont récupérables
+depuis l'application (ils ne sont jamais stockés en clair, seulement
+sous forme de hash). Si vous êtes bloqué :
+  - la personne qui a accès à l'ordinateur/serveur peut supprimer le
+    fichier data.json (cela réinitialise TOUT : mieux vaut d'abord
+    faire une sauvegarde en la renommant, par exemple data-ancien.json)
+  - relancez le serveur : l'écran de configuration initiale
+    réapparaît pour recréer un accès.
+
+
+UTILISER BOUTIQUE TS DEPUIS PLUSIEURS ENDROITS (hors du Wi-Fi local)
+------------------------------------------------------------------------
+Si la commerciale doit scanner en dehors du magasin (livraison,
+marché...), le serveur doit être accessible depuis Internet : il faut
+l'héberger en ligne (Render, Railway, un petit VPS...) avec un DISQUE
+PERSISTANT monté, et définir la variable d'environnement DATA_FILE
+pour pointer vers ce disque (sinon les données seraient effacées à
+chaque redémarrage du service chez l'hébergeur). C'est le même
+principe que pour vos autres projets Node.js déployés de cette
+façon — demandez si vous voulez un guide détaillé pas à pas pour un
+hébergeur précis.
+
+
+ARCHITECTURE (pour information)
+-----------------------------------
+  server.js         → serveur Node.js (aucune dépendance npm)
+  data.json          → toutes les données (créé automatiquement)
+  sauvegardes/        → copies quotidiennes automatiques
+  public/index.html  → page d'accueil (choix Caisse / Scan)
+  public/caisse.html → application complète du gérant/caissier
+  public/scan.html   → application du téléphone de la commerciale
+  public/vendor/     → bibliothèques (scan QR, code-barres) — aucune
+                        dépendance à Internet une fois le serveur lancé
