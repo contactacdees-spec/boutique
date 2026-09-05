@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Scan Vente — Boutique TS</title>
+<style>
+:root{
+  --B1:#0D2E1E;--B2:#14472C;--B3:#1F6B41;--B4:#2C8753;
+  --O1:#C4600A;--O2:#E86A17;--O3:#F28C3F;--O4:#FDEBDA;
+  --GRN:#1F6B41;--GRNP:#e6f5ee;--RED:#c0392b;--REDP:#fdecea;
+  --G4:#8FA396;--W:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+html,body{height:100%;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--B1);color:var(--W);}
+.screen{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;justify-content:center;padding:24px;background:var(--B1);overflow-y:auto;}
+.screen.on{display:flex;}
+.inner{width:100%;max-width:380px;text-align:center;margin:auto;}
+
+.logo{width:60px;height:60px;border-radius:18px;background:var(--O2);display:flex;align-items:center;justify-content:center;margin:0 auto 16px;box-shadow:0 8px 24px rgba(232,106,23,.3);font-size:28px;}
+h1{font-size:22px;font-weight:800;margin-bottom:6px;}
+p.sub{font-size:14px;color:rgba(255,255,255,.6);margin-bottom:28px;line-height:1.5;}
+
+.field{width:100%;padding:16px;text-align:center;font-size:20px;letter-spacing:3px;border-radius:16px;border:2px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;outline:none;margin-bottom:14px;font-family:'SF Mono',Consolas,monospace;}
+.field::placeholder{letter-spacing:1px;font-family:inherit;color:rgba(255,255,255,.35);font-size:14px;}
+input.field-text{text-align:left;letter-spacing:normal;font-family:inherit;font-size:15px;}
+.btn{width:100%;padding:17px;border-radius:999px;background:var(--O2);color:#fff;font-size:16px;font-weight:800;border:none;cursor:pointer;box-shadow:0 8px 22px rgba(232,106,23,.3);}
+.btn:active{transform:scale(.97);}
+.btn.ghost{background:rgba(255,255,255,.1);color:#fff;box-shadow:none;border:1px solid rgba(255,255,255,.18);font-weight:600;font-size:14px;margin-top:10px;}
+.btn.green{background:var(--B4);box-shadow:0 8px 22px rgba(44,135,83,.3);}
+.btn:disabled{opacity:.5;}
+.err{color:#ffb3a7;font-size:13px;margin-top:12px;min-height:16px;font-weight:600;}
+
+/* READY SCREEN */
+.id-card{background:rgba(255,255,255,.06);border:1px solid rgba(232,106,23,.3);border-radius:20px;padding:20px;margin-bottom:18px;text-align:left;}
+.id-row{display:flex;justify-content:space-between;align-items:center;font-size:13px;color:rgba(255,255,255,.6);}
+.id-row b{color:#fff;font-size:14px;}
+.today-box{background:rgba(255,255,255,.05);border-radius:16px;padding:16px;margin-bottom:18px;text-align:left;}
+.today-title{font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:rgba(255,255,255,.5);font-weight:700;margin-bottom:10px;}
+.today-total{font-size:24px;font-weight:800;color:var(--O3);margin-bottom:12px;}
+.today-item{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-top:1px solid rgba(255,255,255,.08);}
+.today-empty{font-size:13px;color:rgba(255,255,255,.4);text-align:center;padding:8px 0;}
+.queue-badge{display:inline-flex;align-items:center;gap:6px;background:var(--REDP);color:var(--RED);padding:8px 14px;border-radius:999px;font-size:12.5px;font-weight:700;margin-bottom:16px;}
+
+/* SCAN SCREEN */
+.scan-frame{position:relative;width:270px;height:270px;margin:0 auto 18px;border-radius:24px;overflow:hidden;background:#000;}
+.scan-frame video{width:100%;height:100%;object-fit:cover;}
+.scan-corner{position:absolute;width:34px;height:34px;border:3px solid var(--O3);}
+.tl{top:10px;left:10px;border-right:none;border-bottom:none;border-radius:8px 0 0 0;}
+.tr{top:10px;right:10px;border-left:none;border-bottom:none;border-radius:0 8px 0 0;}
+.bl{bottom:10px;left:10px;border-right:none;border-top:none;border-radius:0 0 0 8px;}
+.br{bottom:10px;right:10px;border-left:none;border-top:none;border-radius:0 0 8px 0;}
+.scan-line{position:absolute;left:8%;right:8%;height:2px;background:var(--O3);opacity:.85;animation:sweep 2s ease-in-out infinite;}
+@keyframes sweep{0%{top:12%;}50%{top:85%;}100%{top:12%;}}
+.scan-msg{font-size:13.5px;color:rgba(255,255,255,.6);margin-bottom:14px;}
+.scan-manual-wrap{margin-top:4px;}
+
+/* SALE FORM SCREEN */
+.form-card{background:rgba(255,255,255,.06);border-radius:20px;padding:18px;margin-bottom:16px;text-align:left;}
+.form-art-name{font-size:19px;font-weight:800;margin-bottom:2px;}
+.form-art-stock{font-size:12px;color:rgba(255,255,255,.5);margin-bottom:16px;}
+.form-row{margin-bottom:12px;}
+.form-row label{display:block;font-size:11px;color:rgba(255,255,255,.55);text-transform:uppercase;letter-spacing:.4px;font-weight:700;margin-bottom:5px;}
+.form-row input{width:100%;padding:12px 14px;border-radius:12px;border:1.5px solid rgba(255,255,255,.15);background:rgba(255,255,255,.08);color:#fff;font-size:15px;outline:none;}
+.form-row input:focus{border-color:var(--O3);}
+.form-two{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.reste-hint{font-size:12.5px;color:var(--O3);margin-top:4px;}
+
+/* RESULT SCREEN */
+.res-ico{font-size:70px;margin-bottom:14px;animation:pop .4s ease;}
+@keyframes pop{0%{transform:scale(.5);opacity:0;}80%{transform:scale(1.1);}100%{transform:scale(1);opacity:1;}}
+.res-title{font-size:21px;font-weight:800;margin-bottom:8px;}
+.res-sub{font-size:14.5px;color:rgba(255,255,255,.6);margin-bottom:20px;line-height:1.5;}
+.res-badge{display:inline-block;padding:8px 20px;border-radius:999px;font-size:13.5px;font-weight:700;margin-bottom:26px;}
+.badge-ok{background:var(--GRNP);color:var(--GRN);}
+.badge-ko{background:var(--REDP);color:var(--RED);}
+
+.unpair-link{position:fixed;bottom:14px;left:0;right:0;text-align:center;font-size:11px;color:rgba(255,255,255,.3);}
+.unpair-link a{color:rgba(255,255,255,.45);text-decoration:underline;}
+.offline-pill{position:fixed;top:14px;left:0;right:0;text-align:center;}
+.offline-pill span{background:var(--RED);color:#fff;font-size:11.5px;font-weight:700;padding:6px 14px;border-radius:999px;display:none;}
+.offline-pill span.on{display:inline-block;}
+</style>
+</head>
+<body>
+
+<div class="offline-pill"><span id="offline-flag">📡 Hors ligne — les ventes seront envoyées à la reconnexion</span></div>
+
+<!-- ÉCRAN 0 : JUMELAGE -->
+<div class="screen" id="s-pair">
+  <div class="inner">
+    <div class="logo">📱</div>
+    <h1>Scan Vente</h1>
+    <p class="sub">Entrez le jeton fourni par le gérant (Réglages &gt; Application Scan) pour lier ce téléphone à la Boutique.</p>
+    <input type="text" id="pair-token" class="field" maxlength="12" placeholder="JETON" autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false" onkeydown="if(event.key==='Enter')doPair()">
+    <input type="text" id="pair-vendeur" class="field field-text" placeholder="Votre nom (optionnel)" autocomplete="off">
+    <button class="btn" onclick="doPair()">🔗 Lier ce téléphone</button>
+    <div class="err" id="pair-err"></div>
+  </div>
+</div>
+
+<!-- ÉCRAN 1 : PRÊT -->
+<div class="screen" id="s-ready">
+  <div class="inner">
+    <div class="logo">🏪</div>
+    <div class="id-card">
+      <div class="id-row"><span>Boutique</span><b>Boutique TS</b></div>
+      <div class="id-row" style="margin-top:6px;"><span>Vendeur·se</span><b id="ready-vendeur">—</b></div>
+    </div>
+    <div id="queue-badge-wrap"></div>
+    <button class="btn" onclick="startScan()">📷 Scanner un article</button>
+    <button class="btn ghost" onclick="goManualLookup()">⌨️ Saisir un code manuellement</button>
+    <div class="today-box">
+      <div class="today-title">Ventes du jour (cet appareil)</div>
+      <div class="today-total" id="today-total">0 F CFA</div>
+      <div id="today-list"><div class="today-empty">Aucune vente scannée aujourd'hui</div></div>
+    </div>
+    <div class="unpair-link" style="position:static;margin-top:6px;">Ce n'est pas vous ? <a href="#" onclick="unpair();return false;">Changer d'appareil</a></div>
+  </div>
+</div>
+
+<!-- ÉCRAN 2 : SCAN CAMÉRA -->
+<div class="screen" id="s-scan">
+  <div class="inner">
+    <h1 style="font-size:18px;">Visez le QR ou le code-barres</h1>
+    <div class="scan-msg" id="scan-msg">Recherche du code…</div>
+    <div class="scan-frame">
+      <video id="scan-video" autoplay playsinline muted></video>
+      <div class="scan-corner tl"></div><div class="scan-corner tr"></div>
+      <div class="scan-corner bl"></div><div class="scan-corner br"></div>
+      <div class="scan-line"></div>
+    </div>
+    <div class="scan-manual-wrap">
+      <input type="text" id="scan-manual-input" class="field field-text" placeholder="Ou tapez / scannez avec une douchette + Entrée" autocomplete="off">
+    </div>
+    <button class="btn ghost" onclick="stopScan()">← Annuler</button>
+  </div>
+</div>
+
+<!-- ÉCRAN 2b : SAISIE MANUELLE (sans caméra) -->
+<div class="screen" id="s-manual">
+  <div class="inner">
+    <div class="logo">⌨️</div>
+    <h1 style="font-size:19px;">Code produit</h1>
+    <p class="sub">Tapez le code inscrit sur l'étiquette de l'article.</p>
+    <input type="text" id="manual-code-input" class="field" placeholder="CODE" autocomplete="off" autocapitalize="characters" onkeydown="if(event.key==='Enter')submitManualCode()">
+    <button class="btn" onclick="submitManualCode()">Rechercher</button>
+    <button class="btn ghost" onclick="goReady()">← Retour</button>
+    <div class="err" id="manual-err"></div>
+  </div>
+</div>
+
+<!-- ÉCRAN 3 : FORMULAIRE DE VENTE RAPIDE -->
+<div class="screen" id="s-sale">
+  <div class="inner">
+    <div class="form-card">
+      <div class="form-art-name" id="sale-art-name">—</div>
+      <div class="form-art-stock" id="sale-art-stock"></div>
+
+      <div class="form-row">
+        <label>Prix de vente (F CFA)</label>
+        <input type="number" id="sale-prix" inputmode="numeric">
+      </div>
+      <div class="form-two">
+        <div class="form-row">
+          <label>Avance reçue</label>
+          <input type="number" id="sale-avance" inputmode="numeric" oninput="updateResteHint()">
+        </div>
+        <div class="form-row">
+          <label>Client (optionnel)</label>
+          <input type="text" id="sale-client">
+        </div>
+      </div>
+      <div class="reste-hint" id="sale-reste-hint"></div>
+      <div class="form-row" style="margin-top:6px;">
+        <label>Téléphone client (optionnel)</label>
+        <input type="text" id="sale-tel">
+      </div>
+    </div>
+    <button class="btn" onclick="confirmSale()">✓ Enregistrer la vente</button>
+    <button class="btn ghost" onclick="goReady()">← Annuler</button>
+    <div class="err" id="sale-err"></div>
+  </div>
+</div>
+
+<!-- ÉCRAN 4 : RÉSULTAT -->
+<div class="screen" id="s-result">
+  <div class="inner">
+    <div class="res-ico" id="res-ico">✅</div>
+    <div class="res-title" id="res-title">Vente enregistrée</div>
+    <div class="res-sub" id="res-sub"></div>
+    <div class="res-badge" id="res-badge"></div>
+    <button class="btn" onclick="startScan()">📷 Scanner le suivant</button>
+    <button class="btn ghost" onclick="goReady()">← Retour à l'accueil</button>
+  </div>
+</div>
+
+<script src="/vendor/zxing.min.js"></script>
+<script>
+let IDENTITY=null; // {token, vendeur}
+let scanStream=null, scanRAF=null;
+let currentArticle=null; // article trouvé après scan/saisie
+let queue=[]; // ventes en attente d'envoi (mode hors-ligne)
+
+function goScreen(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
+  document.getElementById(id).classList.add('on');
+}
+function fmt(n){ return Math.round(n||0).toLocaleString('fr-FR')+' F CFA'; }
+
+function loadIdentity(){
+  try{ const raw=localStorage.getItem('bts_scan_identity'); IDENTITY=raw?JSON.parse(raw):null; }catch(e){ IDENTITY=null; }
+}
+function saveIdentity(){ localStorage.setItem('bts_scan_identity', JSON.stringify(IDENTITY)); }
+function loadQueue(){
+  try{ const raw=localStorage.getItem('bts_scan_queue'); queue=raw?JSON.parse(raw):[]; }catch(e){ queue=[]; }
+}
+function saveQueue(){ localStorage.setItem('bts_scan_queue', JSON.stringify(queue)); }
+
+function apiHeaders(){ return {'Content-Type':'application/json','X-Scan-Token':(IDENTITY&&IDENTITY.token)||''}; }
+
+function goPair(err){
+  document.getElementById('pair-token').value='';
+  document.getElementById('pair-err').textContent=err||'';
+  goScreen('s-pair');
+}
+function goReady(){
+  document.getElementById('ready-vendeur').textContent = (IDENTITY && IDENTITY.vendeur) || 'Non renseigné';
+  renderQueueBadge();
+  refreshToday();
+  goScreen('s-ready');
+}
+
+async function doPair(){
+  const token=(document.getElementById('pair-token').value||'').trim().toUpperCase();
+  const vendeur=(document.getElementById('pair-vendeur').value||'').trim();
+  if(!token){ document.getElementById('pair-err').textContent='Veuillez saisir le jeton'; return; }
+  let res,body;
+  try{
+    res=await fetch('/api/scan/pair',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    body=await res.json();
+  }catch(e){ document.getElementById('pair-err').textContent='Connexion au serveur impossible.'; return; }
+  if(!res.ok||!body.ok){ document.getElementById('pair-err').textContent=body.error||'Jeton incorrect.'; return; }
+  IDENTITY={token, vendeur};
+  saveIdentity();
+  goReady();
+}
+
+function unpair(){
+  localStorage.removeItem('bts_scan_identity');
+  IDENTITY=null;
+  goPair();
+}
+
+function renderQueueBadge(){
+  const wrap=document.getElementById('queue-badge-wrap');
+  wrap.innerHTML = queue.length ? `<div class="queue-badge">⏳ ${queue.length} vente(s) en attente d'envoi <a href="#" style="color:var(--RED);margin-left:4px;" onclick="flushQueue();return false;">Réessayer</a></div>` : '';
+}
+
+// ===== HISTORIQUE DU JOUR =====
+async function refreshToday(){
+  try{
+    const res=await fetch('/api/scan/today',{headers:apiHeaders()});
+    const body=await res.json();
+    if(!res.ok||!body.ok) return;
+    document.getElementById('today-total').textContent = fmt(body.total);
+    const list=document.getElementById('today-list');
+    list.innerHTML = body.ventes.length ? body.ventes.map(v=>`
+      <div class="today-item"><span>${v.article}${v.client?(' — '+v.client):''}</span><span>${fmt(v.avance)}</span></div>
+    `).join('') : '<div class="today-empty">Aucune vente scannée aujourd\'hui</div>';
+  }catch(e){ /* hors-ligne : on garde l'affichage précédent */ }
+}
+
+// ===== SCAN CAMÉRA =====
+let zxingReader=null;
+function getZXingReader(){
+  if(zxingReader) return zxingReader;
+  if(typeof ZXing==='undefined') return null;
+  const hints=new Map();
+  hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+    ZXing.BarcodeFormat.QR_CODE, ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+    ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E, ZXing.BarcodeFormat.CODE_128,
+    ZXing.BarcodeFormat.CODE_39, ZXing.BarcodeFormat.ITF, ZXing.BarcodeFormat.CODABAR
+  ]);
+  zxingReader=new ZXing.MultiFormatReader();
+  zxingReader.setHints(hints);
+  return zxingReader;
+}
+
+async function startScan(){
+  document.getElementById('scan-msg').textContent='Recherche du QR ou du code-barres…';
+  document.getElementById('scan-manual-input').value='';
+  goScreen('s-scan');
+  try{
+    scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:640},height:{ideal:640}},audio:false});
+  }catch(e){
+    document.getElementById('scan-msg').textContent='⚠️ Caméra indisponible — utilisez la saisie ci-dessous.';
+    scanStream=null;
+  }
+  const video=document.getElementById('scan-video');
+  const mi=document.getElementById('scan-manual-input');
+  mi.onkeydown=function(ev){
+    if(ev.key==='Enter'){ ev.preventDefault(); const v=mi.value.trim(); mi.value=''; if(v) onCodeDetected(v); }
+  };
+  setTimeout(()=>mi.focus(), 200);
+  if(!scanStream) return;
+
+  video.srcObject=scanStream;
+  await new Promise(r=>{ video.onloadedmetadata=r; });
+
+  const canvas=document.createElement('canvas');
+  const ctx=canvas.getContext('2d', {willReadFrequently:true});
+  let handled=false;
+  const reader=getZXingReader();
+
+  function tick(){
+    if(handled) return;
+    if(video.readyState===video.HAVE_ENOUGH_DATA){
+      canvas.width=video.videoWidth; canvas.height=video.videoHeight;
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      if(reader){
+        try{
+          const luminanceSource=new ZXing.HTMLCanvasElementLuminanceSource(canvas);
+          const binaryBitmap=new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(luminanceSource));
+          const result=reader.decodeWithState(binaryBitmap);
+          if(result&&result.getText()){ handled=true; onCodeDetected(result.getText().trim()); return; }
+        }catch(notFound){ /* rien détecté sur cette image, on continue */ }
+      }
+    }
+    scanRAF=requestAnimationFrame(tick);
+  }
+  scanRAF=requestAnimationFrame(tick);
+}
+function stopScan(){
+  if(scanRAF) cancelAnimationFrame(scanRAF);
+  scanRAF=null;
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
+  goReady();
+}
+function goManualLookup(){
+  document.getElementById('manual-code-input').value='';
+  document.getElementById('manual-err').textContent='';
+  goScreen('s-manual');
+  setTimeout(()=>document.getElementById('manual-code-input').focus(),150);
+}
+function submitManualCode(){
+  const v=(document.getElementById('manual-code-input').value||'').trim();
+  if(!v){ document.getElementById('manual-err').textContent='Veuillez saisir un code'; return; }
+  onCodeDetected(v);
+}
+
+async function onCodeDetected(code){
+  if(scanRAF) cancelAnimationFrame(scanRAF);
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
+  const msgEl=document.getElementById('scan-msg');
+  if(msgEl) msgEl.textContent='Recherche de l\'article…';
+
+  let res,body;
+  try{
+    res=await fetch('/api/scan/lookup?code='+encodeURIComponent(code),{headers:apiHeaders()});
+    body=await res.json();
+  }catch(e){
+    document.getElementById('manual-err').textContent='';
+    showResult(false,'Connexion impossible','Vérifiez votre connexion et réessayez.');
+    return;
+  }
+  if(!res.ok||!body.ok){
+    if(document.getElementById('s-manual').classList.contains('on')){
+      document.getElementById('manual-err').textContent='⛔ '+(body.error||'Article introuvable');
+      return;
+    }
+    showResult(false,'Article introuvable', (body.error||'Ce code ne correspond à aucun article.')+' Demandez au gérant de l\'ajouter au catalogue.');
+    return;
+  }
+  currentArticle=body.article;
+  document.getElementById('sale-art-name').textContent=currentArticle.nom;
+  document.getElementById('sale-art-stock').textContent='Stock disponible : '+currentArticle.stock;
+  document.getElementById('sale-prix').value=currentArticle.vente;
+  document.getElementById('sale-avance').value=currentArticle.vente;
+  document.getElementById('sale-client').value='';
+  document.getElementById('sale-tel').value='';
+  document.getElementById('sale-err').textContent='';
+  updateResteHint();
+  goScreen('s-sale');
+}
+
+function updateResteHint(){
+  const pv=parseFloat(document.getElementById('sale-prix').value)||0;
+  const av=parseFloat(document.getElementById('sale-avance').value)||0;
+  const reste=Math.max(0,pv-av);
+  const hint=document.getElementById('sale-reste-hint');
+  hint.textContent = reste>0 ? `⚠️ Reste à payer par le client : ${fmt(reste)}` : (pv>0 ? '✅ Paiement complet' : '');
+}
+
+// ===== ENREGISTREMENT DE LA VENTE =====
+async function confirmSale(){
+  if(!currentArticle) return;
+  const pv=parseFloat(document.getElementById('sale-prix').value)||0;
+  if(!pv){ document.getElementById('sale-err').textContent='⛔ Le prix de vente est requis'; return; }
+  const payload={
+    code: currentArticle.code,
+    prixvente: pv,
+    avance: parseFloat(document.getElementById('sale-avance').value)||0,
+    client: document.getElementById('sale-client').value.trim(),
+    tel: document.getElementById('sale-tel').value.trim(),
+    vendeur: (IDENTITY && IDENTITY.vendeur) || ''
+  };
+  await sendSale(payload, currentArticle.nom, pv);
+}
+
+async function sendSale(payload, artNom, pv){
+  try{
+    const res=await fetch('/api/scan/vente',{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)});
+    const body=await res.json();
+    if(!res.ok||!body.ok) throw new Error(body.error||'Erreur serveur');
+    showResult(true, 'Vente enregistrée', artNom+' — '+fmt(pv)+(body.vente.reste>0?(' (reste '+fmt(body.vente.reste)+')'):''), body.vente.reste>0?'⚠️ Paiement partiel':'✅ Payé intégralement', body.vente.reste>0);
+  }catch(e){
+    // Hors-ligne ou serveur injoignable : on met la vente en file d'attente locale
+    queue.push(payload);
+    saveQueue();
+    showResult(true, 'Vente mise en attente', artNom+' — '+fmt(pv)+'. Elle sera envoyée automatiquement dès que la connexion reviendra.', '📡 Hors ligne', true);
+  }
+}
+
+async function flushQueue(){
+  if(!queue.length) return;
+  const remaining=[];
+  for(const payload of queue){
+    try{
+      const res=await fetch('/api/scan/vente',{method:'POST',headers:apiHeaders(),body:JSON.stringify(payload)});
+      const body=await res.json();
+      if(!res.ok||!body.ok) remaining.push(payload);
+    }catch(e){ remaining.push(payload); }
+  }
+  queue=remaining;
+  saveQueue();
+  renderQueueBadge();
+  refreshToday();
+}
+
+function showResult(ok, title, sub, badgeText, isWarn){
+  document.getElementById('res-ico').textContent = ok ? '✅' : '⚠️';
+  document.getElementById('res-title').textContent = title;
+  document.getElementById('res-sub').textContent = sub||'';
+  const badge=document.getElementById('res-badge');
+  if(badgeText){
+    badge.style.display='inline-block';
+    badge.className='res-badge '+(isWarn?'badge-ko':'badge-ok');
+    badge.textContent=badgeText;
+  } else { badge.style.display='none'; }
+  goScreen('s-result');
+}
+
+// ===== RÉSEAU =====
+function updateOfflineFlag(){
+  document.getElementById('offline-flag').classList.toggle('on', !navigator.onLine);
+}
+window.addEventListener('online', ()=>{ updateOfflineFlag(); flushQueue(); });
+window.addEventListener('offline', updateOfflineFlag);
+
+// ===== INIT =====
+(function init(){
+  loadIdentity();
+  loadQueue();
+  updateOfflineFlag();
+  if(IDENTITY && IDENTITY.token){ goReady(); if(navigator.onLine) flushQueue(); }
+  else { goPair(); }
+})();
+</script>
+</body>
+</html>
