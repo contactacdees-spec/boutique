@@ -45,10 +45,10 @@ Cette adresse ouvre la page d'accueil avec deux cartes : "Caisse" et
 PREMIÈRE UTILISATION
 ---------------------
 1. Sur l'ordinateur/tablette de la boutique, ouvrez /caisse.html
-2. Créez votre identifiant, votre mot de passe, et un CODE SECRET DE
-   SUPPRESSION (différent du mot de passe). Ce code sera exigé à
-   chaque suppression d'une vente, d'un achat ou d'un article — il
-   n'est plus jamais réaffiché ensuite. Notez-le en lieu sûr.
+2. Créez votre identifiant et votre mot de passe. Un CODE SECRET DE
+   SUPPRESSION à 6 chiffres est généré automatiquement et affiché à
+   l'écran une seule fois — notez-le en lieu sûr. Ce code sera exigé
+   à chaque suppression d'une vente, d'un achat ou d'un article.
 3. Ajoutez vos premiers articles dans "Articles & Stock".
 4. Ouvrez ⚙️ (Sécurité & appareils) : vous y trouverez le JETON DE
    JUMELAGE de l'app Scan (8 caractères) et son QR.
@@ -78,8 +78,13 @@ CODES-BARRES ET QR DES PRODUITS
 Chaque article a un code unique. Dans "Articles & Stock", le bouton
 🏷️ génère une étiquette imprimable (code-barres + QR) ; le bouton
 "Imprimer les étiquettes" permet d'imprimer plusieurs étiquettes à la
-fois. C'est ce QR que le téléphone de la commerciale scanne pour
-retrouver l'article et enregistrer la vente.
+fois.
+
+Le scanner (caméra) lit aussi bien les QR que les codes-barres
+courants (EAN-13, EAN-8, UPC-A, Code128, Code39...) : vous pouvez donc
+scanner une étiquette déjà imprimée par Boutique TS, mais aussi le
+code-barres d'origine imprimé par le fabricant sur un produit déjà
+emballé, pour l'enregistrer directement avec ce code.
 
 
 SI LE TÉLÉPHONE N'A PAS ACCÈS À LA CAMÉRA
@@ -87,6 +92,18 @@ SI LE TÉLÉPHONE N'A PAS ACCÈS À LA CAMÉRA
 L'app Scan propose aussi une saisie manuelle du code, et fonctionne
 avec une douchette USB/Bluetooth (elle "tape" le code comme un
 clavier). Aucune fonctionnalité n'est bloquée sans caméra.
+
+
+IMPRIMER UN REÇU (vente ou achat)
+-------------------------------------
+Après avoir enregistré une vente ou un achat dans la Caisse, un
+aperçu du reçu s'ouvre automatiquement (bouton 🧾 disponible aussi à
+tout moment sur chaque ligne du tableau). Le bouton "Imprimer le
+reçu" ouvre la fenêtre d'impression normale du système : elle propose
+toutes les imprimantes déjà configurées sur cet ordinateur/tablette,
+qu'elles soient reliées en Wi-Fi ou par câble USB — Boutique TS ne
+fait qu'ouvrir cette fenêtre, l'imprimante doit déjà être installée
+au niveau de Windows/Mac comme pour n'importe quel autre logiciel.
 
 
 UTILISER LE SCAN SANS RÉSEAU (Wi-Fi instable)
@@ -106,14 +123,20 @@ temps en temps (clé USB, cloud...).
 
 MOT DE PASSE OU CODE DE SUPPRESSION PERDU
 ---------------------------------------------
-Ni le mot de passe ni le code de suppression ne sont récupérables
-depuis l'application (ils ne sont jamais stockés en clair, seulement
-sous forme de hash). Si vous êtes bloqué :
-  - la personne qui a accès à l'ordinateur/serveur peut supprimer le
-    fichier data.json (cela réinitialise TOUT : mieux vaut d'abord
-    faire une sauvegarde en la renommant, par exemple data-ancien.json)
-  - relancez le serveur : l'écran de configuration initiale
-    réapparaît pour recréer un accès.
+Le mot de passe et le code de suppression ne sont jamais stockés en
+clair (seulement sous forme de hash) et ne peuvent donc pas être
+"affichés" en cas d'oubli — mais ils peuvent être RÉINITIALISÉS :
+
+  - Code de suppression oublié : dans ⚙️ Sécurité, section "code
+    oublié", il suffit de ressaisir votre mot de passe de connexion
+    pour générer un nouveau code de suppression (affiché une seule
+    fois). Vous n'avez pas besoin de connaître l'ancien code.
+  - Mot de passe de connexion perdu : c'est la seule situation sans
+    récupération depuis l'application. La personne qui a accès à
+    l'ordinateur/serveur doit supprimer le fichier data.json (cela
+    réinitialise TOUT : mieux vaut d'abord le sauvegarder en le
+    renommant, par exemple data-ancien.json), puis relancer le
+    serveur : l'écran de configuration initiale réapparaît.
 
 
 UTILISER BOUTIQUE TS DEPUIS PLUSIEURS ENDROITS (hors du Wi-Fi local)
@@ -137,5 +160,6 @@ ARCHITECTURE (pour information)
   public/index.html  → page d'accueil (choix Caisse / Scan)
   public/caisse.html → application complète du gérant/caissier
   public/scan.html   → application du téléphone de la commerciale
-  public/vendor/     → bibliothèques (scan QR, code-barres) — aucune
-                        dépendance à Internet une fois le serveur lancé
+  public/vendor/     → bibliothèques (scan QR + codes-barres, génération
+                        code-barres/QR) — aucune dépendance à Internet
+                        une fois le serveur lancé

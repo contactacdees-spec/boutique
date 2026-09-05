@@ -83,6 +83,14 @@ function randomArticleCode() {
   return s;
 }
 
+// Code de suppression : 6 chiffres, facile à noter/taper, généré automatiquement
+// (jamais choisi manuellement à la configuration pour éviter tout blocage à l'ouverture).
+function randomDeleteCode() {
+  let s = '';
+  for (let i = 0; i < 6; i++) s += crypto.randomInt(10);
+  return s;
+}
+
 // Sessions Caisse en mémoire (sid -> {username, expires})
 const sessions = new Map();
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12h
@@ -326,12 +334,15 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const username = (body.username || '').trim();
       const password = body.password || '';
-      const deleteCode = (body.deleteCode || '').trim();
-      if (!username || password.length < 4 || deleteCode.length < 4) {
-        return sendJSON(res, 400, { ok: false, error: 'Identifiant, mot de passe (min. 4) et code de suppression (min. 4) requis.' });
+      if (!username || password.length < 4) {
+        return sendJSON(res, 400, { ok: false, error: 'Identifiant et mot de passe (min. 4 caractères) requis.' });
       }
       const pwSalt = makeSalt();
       const codeSalt = makeSalt();
+      // Le code de suppression est TOUJOURS généré automatiquement (jamais saisi
+      // manuellement) pour qu'un oubli/mauvaise saisie ne bloque jamais l'ouverture
+      // de l'application. Il est renvoyé une seule fois dans cette réponse.
+      const deleteCode = randomDeleteCode();
       data.settings.caisseUsername = username;
       data.settings.caissePasswordSalt = pwSalt;
       data.settings.caissePasswordHash = hashSecret(password, pwSalt);
@@ -341,7 +352,7 @@ const server = http.createServer(async (req, res) => {
       writeData(data);
       const sid = createSession(username);
       setCookie(req, res, 'sid', sid, { maxAge: 12 * 60 * 60 });
-      return sendJSON(res, 200, { ok: true, username });
+      return sendJSON(res, 200, { ok: true, username, deleteCode });
     }
 
     if (urlPath === '/api/login' && req.method === 'POST') {
@@ -399,6 +410,24 @@ const server = http.createServer(async (req, res) => {
       data.settings.deleteCodeHash = hashSecret(newCode, salt);
       writeData(data);
       return sendJSON(res, 200, { ok: true });
+    }
+
+    // Code de suppression oublié : réinitialisation via le mot de passe de
+    // connexion (pas besoin de connaître l'ancien code). Un nouveau code
+    // aléatoire est généré et renvoyé une seule fois.
+    if (urlPath === '/api/settings/delete-code/reset' && req.method === 'POST') {
+      const data = readData();
+      if (!requireCaisse(req)) return sendJSON(res, 401, { ok: false, error: 'Non authentifié' });
+      if (!checkRateLimit('delreset:' + ip, 5, 15 * 60 * 1000)) return sendJSON(res, 429, { ok: false, error: 'Trop de tentatives. Réessayez dans quelques minutes.' });
+      const body = await readBody(req);
+      const curHash = hashSecret(body.password || '', data.settings.caissePasswordSalt);
+      if (!safeEqual(curHash, data.settings.caissePasswordHash)) return sendJSON(res, 401, { ok: false, error: 'Mot de passe incorrect' });
+      const newCode = randomDeleteCode();
+      const salt = makeSalt();
+      data.settings.deleteCodeSalt = salt;
+      data.settings.deleteCodeHash = hashSecret(newCode, salt);
+      writeData(data);
+      return sendJSON(res, 200, { ok: true, deleteCode: newCode });
     }
 
     if (urlPath === '/api/settings/scan-token/regenerate' && req.method === 'POST') {
@@ -567,7 +596,6 @@ const server = http.createServer(async (req, res) => {
       if (!checkRateLimit('delcode:' + ip, 3, 30 * 1000)) return sendJSON(res, 429, { ok: false, error: 'Trop de tentatives. Réessayez dans 30 secondes.' });
       const id = Number(urlPath.split('/')[3]);
       const body = await readBody(req);
-      const hash = hashSecret(body.code || '', data.settings.deleteCodeHash ? data.settings.deleteCodeSalt : '');
       if (!safeEqual(hashSecret(body.code || '', data.settings.deleteCodeSalt), data.settings.deleteCodeHash)) return sendJSON(res, 403, { ok: false, error: 'Code de suppression incorrect' });
       data.achats = data.achats.filter(a => a.id !== id);
       writeData(data);
