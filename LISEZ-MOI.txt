@@ -105,6 +105,18 @@ qu'elles soient reliées en Wi-Fi ou par câble USB — Boutique TS ne
 fait qu'ouvrir cette fenêtre, l'imprimante doit déjà être installée
 au niveau de Windows/Mac comme pour n'importe quel autre logiciel.
 
+La commerciale peut faire pareil depuis l'app Scan : après avoir
+validé une vente sur son téléphone, un bouton "🖨️ Imprimer le reçu"
+apparaît sur l'écran de confirmation. Cela ouvre la fenêtre
+d'impression du téléphone, qui ne proposera une imprimante que si le
+téléphone en a une accessible (imprimante Wi-Fi compatible, ou
+application d'impression installée) — sans imprimante disponible, le
+téléphone n'a simplement rien à proposer dans cette fenêtre, ce n'est
+pas une limite de Boutique TS mais du téléphone lui-même. Si la vente
+a été enregistrée hors-ligne (mise en attente), le reçu peut quand
+même être imprimé immédiatement ; il indique alors "en attente de
+synchronisation" à la place du numéro définitif.
+
 
 UTILISER LE SCAN SANS RÉSEAU (Wi-Fi instable)
 -------------------------------------------------
