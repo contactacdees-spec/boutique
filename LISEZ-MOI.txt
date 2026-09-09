@@ -87,6 +87,25 @@ code-barres d'origine imprimé par le fabricant sur un produit déjà
 emballé, pour l'enregistrer directement avec ce code.
 
 
+PANIER MULTI-PRODUITS (app Scan)
+------------------------------------
+Depuis le téléphone, la commerciale peut désormais scanner plusieurs
+articles différents avant de valider une seule vente :
+  1. Elle scanne un produit → indique la quantité prise (boutons +/-,
+     utile si elle prend plusieurs unités du même article) → "Ajouter
+     au panier".
+  2. Elle peut scanner d'autres produits différents, qui s'ajoutent
+     au même panier (visible à tout moment via "🛒 Voir le panier").
+  3. Une fois terminé, "Passer au paiement" affiche le total de tous
+     les articles, demande l'avance reçue et les infos client, puis
+     "Valider la vente" enregistre tout d'un coup.
+  4. Le reçu imprimable liste alors chaque article avec sa quantité
+     et son sous-total, plus le total général.
+Si le paiement ne couvre pas tout le panier, les premiers articles
+scannés sont considérés payés en priorité, et le reste s'applique aux
+suivants.
+
+
 SI LE TÉLÉPHONE N'A PAS ACCÈS À LA CAMÉRA
 --------------------------------------------
 L'app Scan propose aussi une saisie manuelle du code, et fonctionne
@@ -162,6 +181,44 @@ chaque redémarrage du service chez l'hébergeur). C'est le même
 principe que pour vos autres projets Node.js déployés de cette
 façon — demandez si vous voulez un guide détaillé pas à pas pour un
 hébergeur précis.
+
+
+INTELLIGENCE & ALERTES (onglet 🧠)
+-------------------------------------
+Un onglet "Intelligence" analyse automatiquement vos données — sans
+aucune connexion internet ni service externe :
+
+  - Produits à solder : articles en stock non vendus depuis plus de
+    30 jours (remise suggérée de 20 à 50% selon l'ancienneté), avec
+    un bouton pour appliquer directement le nouveau prix.
+  - Produits à mettre en avant : classement des articles à la fois
+    rentables (forte marge) et qui se vendent bien, à privilégier en
+    vitrine ou en promotion.
+  - Tendances saisonnières : à partir de l'historique des ventes,
+    détecte la période de l'année où chaque article se vend le
+    mieux (ex : "se vend surtout de Décembre à Février").
+  - Alertes : écarts de caisse répétés, ventes à perte, nombre élevé
+    de suppressions récentes.
+  - Rapport de fin de semaine : bouton "Générer le rapport" qui
+    compare la semaine à la précédente, liste les problèmes détectés
+    et propose des pistes d'action.
+
+IA EXTERNE (optionnelle)
+----------------------------
+Dans l'onglet Intelligence, le bouton "⚙️ IA externe" permet de
+brancher votre propre clé API (OpenAI, Anthropic, ou tout service
+compatible via une URL personnalisée). Une fois activée, le rapport
+de fin de semaine inclut en plus un résumé rédigé en langage naturel
+par cette IA, à partir des mêmes chiffres déjà calculés localement.
+Sans clé configurée, tout le reste du module Intelligence continue
+de fonctionner normalement — l'IA externe n'est qu'un supplément.
+
+À savoir : la clé API est enregistrée dans data.json pour que le
+serveur puisse s'en servir (ce n'est pas un mot de passe qui peut
+être "haché" — il faut la valeur réelle pour appeler le service). Elle
+n'est jamais renvoyée à l'écran une fois enregistrée : seul un
+indicateur "clé enregistrée" est affiché, et vous pouvez la remplacer
+ou la retirer à tout moment.
 
 
 ARCHITECTURE (pour information)

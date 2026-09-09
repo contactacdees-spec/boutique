@@ -69,6 +69,10 @@ function randomPassword(len) {
   return s;
 }
 
+function fmtLog(n) {
+  return Math.round(n || 0).toLocaleString('fr-FR') + ' F CFA';
+}
+
 function randomToken() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // sans caractères ambigus
   let s = '';
@@ -160,6 +164,8 @@ function defaultData() {
     achats: [],
     depenses: [],
     caisseManuelle: null,
+    caisseVerifications: [],
+    journal: [],
     nextId: 1,
     settings: {
       setupDone: false,
@@ -168,7 +174,8 @@ function defaultData() {
       caissePasswordHash: '',
       deleteCodeSalt: '',
       deleteCodeHash: '',
-      scanToken: randomToken()
+      scanToken: randomToken(),
+      ai: { enabled: false, provider: 'openai', model: '', baseUrl: '', apiKey: '' }
     }
   };
 }
@@ -187,14 +194,25 @@ function readData() {
   if (!Array.isArray(d.ventes)) { d.ventes = []; changed = true; }
   if (!Array.isArray(d.achats)) { d.achats = []; changed = true; }
   if (!Array.isArray(d.depenses)) { d.depenses = []; changed = true; }
+  if (!Array.isArray(d.caisseVerifications)) { d.caisseVerifications = []; changed = true; }
+  if (!Array.isArray(d.journal)) { d.journal = []; changed = true; }
   if (typeof d.nextId !== 'number') { d.nextId = 1; changed = true; }
   if (d.caisseManuelle === undefined) { d.caisseManuelle = null; changed = true; }
   if (!d.settings) { d.settings = defaultData().settings; changed = true; }
   if (!d.settings.scanToken) { d.settings.scanToken = randomToken(); changed = true; }
+  if (!d.settings.ai) { d.settings.ai = defaultData().settings.ai; changed = true; }
   if (typeof d.settings.setupDone !== 'boolean') { d.settings.setupDone = !!d.settings.caissePasswordHash; changed = true; }
   d.articles.forEach(a => { if (!a.code) { a.code = randomArticleCode(); changed = true; } });
   if (changed) writeData(d);
   return d;
+}
+
+// Ajoute une entrée dans le journal (audit léger : suppressions, ventes à
+// perte, écarts de caisse...) utilisé par le module d'analyse intelligente.
+function logJournal(data, type, detail) {
+  data.journal.push({ id: data.nextId++, date: new Date().toISOString(), type, detail });
+  // Garde un historique borné pour ne pas faire grossir data.json indéfiniment.
+  if (data.journal.length > 2000) data.journal = data.journal.slice(-2000);
 }
 
 function writeData(obj) {
@@ -273,7 +291,11 @@ function requireScan(req, data) {
 }
 
 function publicSettings(data) {
-  return { caisseUsername: data.settings.caisseUsername, scanToken: data.settings.scanToken, setupDone: data.settings.setupDone };
+  const ai = data.settings.ai || {};
+  return {
+    caisseUsername: data.settings.caisseUsername, scanToken: data.settings.scanToken, setupDone: data.settings.setupDone,
+    ai: { enabled: !!ai.enabled, provider: ai.provider || 'openai', model: ai.model || '', baseUrl: ai.baseUrl || '', hasKey: !!ai.apiKey }
+  };
 }
 
 // Sanitize un article pour l'app Scan (pas de prix d'achat / marge : ce n'est
@@ -289,6 +311,7 @@ function createVente(data, payload, source) {
   const pv = Number(payload.prixvente) || 0;
   const pa = Number(payload.prixachat) || 0;
   const dc = Number(payload.depcolis) || 0;
+  const qte = Math.max(1, Number(payload.quantite) || 1);
   const av = Math.min(Number(payload.avance) || 0, pv);
   const reste = Math.max(0, pv - av);
   const rec = {
@@ -298,19 +321,257 @@ function createVente(data, payload, source) {
     articleCode: payload.articleCode || '',
     client: payload.client || '',
     tel: payload.tel || '',
-    prixvente: pv, prixachat: pa, depcolis: dc,
+    prixvente: pv, prixachat: pa, depcolis: dc, quantite: qte,
     marge: pv - pa - dc, avance: av, reste,
     lieu: payload.lieu || '',
     comment: payload.comment || '',
     vendeur: payload.vendeur || '',
+    panierId: payload.panierId || null,
     source: source || 'caisse'
   };
   data.ventes.push(rec);
   const art = data.articles.find(a => a.nom === payload.article);
-  if (art && art.stock > 0) art.stock--;
+  if (art) art.stock = Math.max(0, art.stock - qte);
+  if (rec.marge < 0) {
+    logJournal(data, 'vente_a_perte', `Vente à perte : ${rec.article} — marge ${fmtLog(rec.marge)}`);
+  }
   writeData(data);
   return rec;
 }
+
+function computeCaisseCalculee(data) {
+  const totalAvances = data.ventes.reduce((s, v) => s + v.avance, 0);
+  const totalAchats = data.achats.reduce((s, a) => s + a.paye, 0);
+  const totalDep = data.depenses.reduce((s, d) => s + d.montant, 0);
+  return totalAvances - totalAchats - totalDep;
+}
+
+// ============================================================
+// MODULE D'ANALYSE INTELLIGENTE
+// ------------------------------------------------------------
+// Tout ce module fonctionne uniquement à partir des données déjà
+// présentes (ventes, achats, articles, caisse, journal) — aucune
+// dépendance à un service externe. L'IA externe (optionnelle, voir
+// plus bas) vient seulement mettre en mots ces chiffres.
+// ============================================================
+function daysBetween(d1, d2) {
+  return Math.floor((d2 - d1) / 86400000);
+}
+
+function computeStockDormant(data, seuilJours) {
+  seuilJours = seuilJours || 30;
+  const now = new Date();
+  const lastSaleByArticle = {};
+  data.ventes.forEach(v => {
+    const d = new Date(v.date);
+    if (isNaN(d.getTime())) return;
+    if (!lastSaleByArticle[v.article] || d > lastSaleByArticle[v.article]) lastSaleByArticle[v.article] = d;
+  });
+  const out = [];
+  data.articles.forEach(a => {
+    if (!(a.stock > 0)) return;
+    const last = lastSaleByArticle[a.nom];
+    const jamaisVendu = !last;
+    const jours = jamaisVendu ? null : daysBetween(last, now);
+    if (jamaisVendu || jours > seuilJours) {
+      const j = jamaisVendu ? 999 : jours;
+      let remise = 0;
+      if (j > 90) remise = 50; else if (j > 60) remise = 30; else if (j > 30) remise = 20;
+      out.push({
+        articleId: a.id, nom: a.nom, code: a.code, stock: a.stock,
+        joursSansVente: jamaisVendu ? null : jours, jamaisVendu,
+        prixVenteActuel: a.vente, remiseSuggeree: remise,
+        prixSuggere: Math.round(a.vente * (1 - remise / 100))
+      });
+    }
+  });
+  out.sort((x, y) => (y.joursSansVente === null ? 999 : y.joursSansVente) - (x.joursSansVente === null ? 999 : x.joursSansVente));
+  return out;
+}
+
+function computeEcartsCaisse(data) {
+  const now = new Date();
+  const recent = data.caisseVerifications.filter(v => daysBetween(new Date(v.date), now) <= 30);
+  const anomalies = recent.filter(v => Math.abs(v.ecart) > 500);
+  return {
+    totalVerifications: recent.length,
+    nbAnomalies: anomalies.length,
+    recurrent: anomalies.length >= 2,
+    derniere: data.caisseVerifications.length ? data.caisseVerifications[data.caisseVerifications.length - 1] : null,
+    historique: recent.slice(-10).reverse()
+  };
+}
+
+function computeAnomalies(data) {
+  const now = new Date();
+  const recent = data.journal.filter(j => daysBetween(new Date(j.date), now) <= 30);
+  const ventesAPerte = recent.filter(j => j.type === 'vente_a_perte');
+  const suppressions = recent.filter(j => j.type.indexOf('suppression_') === 0);
+  const ecarts = recent.filter(j => j.type === 'ecart_caisse');
+  return {
+    ventesAPerte: ventesAPerte.slice(-15).reverse(),
+    suppressions: suppressions.slice(-15).reverse(),
+    ecarts: ecarts.slice(-15).reverse(),
+    alerteSuppressions: suppressions.length >= 5
+  };
+}
+
+function computeMiseEnAvant(data) {
+  const now = new Date();
+  const soldLast60 = {};
+  data.ventes.forEach(v => {
+    if (daysBetween(new Date(v.date), now) > 60) return;
+    if (!soldLast60[v.article]) soldLast60[v.article] = { qte: 0, margeTotale: 0 };
+    soldLast60[v.article].qte++;
+    soldLast60[v.article].margeTotale += v.marge;
+  });
+  const scored = data.articles.filter(a => a.stock > 0).map(a => {
+    const pctMarge = a.vente > 0 ? Math.round((a.vente - a.achat) / a.vente * 100) : 0;
+    const ventes = soldLast60[a.nom] || { qte: 0, margeTotale: 0 };
+    const score = pctMarge * 0.6 + Math.min(ventes.qte, 20) * 2;
+    return { articleId: a.id, nom: a.nom, code: a.code, pctMarge, margeUnitaire: a.vente - a.achat, qteVendue60j: ventes.qte, stock: a.stock, score };
+  });
+  scored.sort((x, y) => y.score - x.score);
+  return scored.slice(0, 6);
+}
+
+function computeSaisonnier(data) {
+  const moisNoms = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+  const byArticle = {};
+  data.ventes.forEach(v => {
+    const d = new Date(v.date);
+    if (isNaN(d.getTime())) return;
+    const m = d.getMonth();
+    if (!byArticle[v.article]) byArticle[v.article] = Array(12).fill(0);
+    byArticle[v.article][m] += v.prixvente;
+  });
+  const out = [];
+  Object.entries(byArticle).forEach(([nom, mois]) => {
+    const total = mois.reduce((s, x) => s + x, 0);
+    if (total <= 0) return;
+    let best = { start: 0, sum: -1 };
+    for (let start = 0; start < 12; start++) {
+      let sum = 0;
+      for (let k = 0; k < 3; k++) sum += mois[(start + k) % 12];
+      if (sum > best.sum) best = { start, sum };
+    }
+    const pctConcentration = total > 0 ? Math.round(best.sum / total * 100) : 0;
+    if (pctConcentration < 40) return;
+    out.push({ nom, periode: `${moisNoms[best.start]} à ${moisNoms[(best.start + 2) % 12]}`, pctConcentration, totalVentes: total });
+  });
+  out.sort((x, y) => y.pctConcentration - x.pctConcentration);
+  return out.slice(0, 8);
+}
+
+function computeAnalytics(data) {
+  return {
+    stockDormant: computeStockDormant(data),
+    ecartsCaisse: computeEcartsCaisse(data),
+    anomalies: computeAnomalies(data),
+    miseEnAvant: computeMiseEnAvant(data),
+    saisonnier: computeSaisonnier(data)
+  };
+}
+
+function computeRapportHebdo(data, analytics) {
+  const now = new Date();
+  const semaine = data.ventes.filter(v => { const j = daysBetween(new Date(v.date), now); return j >= 0 && j <= 7; });
+  const semainePrec = data.ventes.filter(v => { const j = daysBetween(new Date(v.date), now); return j > 7 && j <= 14; });
+  const caSemaine = semaine.reduce((s, v) => s + v.avance, 0);
+  const caPrec = semainePrec.reduce((s, v) => s + v.avance, 0);
+  const margeSemaine = semaine.reduce((s, v) => s + v.marge, 0);
+  const evolution = caPrec > 0 ? Math.round((caSemaine - caPrec) / caPrec * 100) : null;
+
+  const byArt = {};
+  semaine.forEach(v => { byArt[v.article] = (byArt[v.article] || 0) + v.prixvente; });
+  const topEntry = Object.entries(byArt).sort((a, b) => b[1] - a[1])[0];
+
+  const ventesAPerteSemaine = analytics.anomalies.ventesAPerte.filter(j => daysBetween(new Date(j.date), now) <= 7);
+
+  const problemes = [];
+  if (evolution !== null && evolution < -15) problemes.push(`Le chiffre d'affaires a baissé de ${Math.abs(evolution)}% par rapport à la semaine précédente.`);
+  if (analytics.stockDormant.length > 0) problemes.push(`${analytics.stockDormant.length} article(s) n'ont pas été vendus depuis plus de 30 jours.`);
+  if (analytics.ecartsCaisse.recurrent) problemes.push(`Des écarts de caisse ont été détectés à plusieurs reprises ce mois-ci.`);
+  if (ventesAPerteSemaine.length > 0) problemes.push(`${ventesAPerteSemaine.length} vente(s) à perte cette semaine.`);
+  if (analytics.anomalies.alerteSuppressions) problemes.push(`Un nombre élevé de suppressions a été enregistré récemment.`);
+
+  return {
+    periode: { debut: new Date(now.getTime() - 7 * 86400000).toISOString().split('T')[0], fin: now.toISOString().split('T')[0] },
+    caSemaine, caPrec, evolution, margeSemaine, nbVentes: semaine.length,
+    topArticle: topEntry ? { nom: topEntry[0], montant: topEntry[1] } : null,
+    problemes,
+    ventesAPerteSemaine: ventesAPerteSemaine.length
+  };
+}
+
+// ============================================================
+// IA EXTERNE (optionnelle) — clé API fournie par l'utilisateur.
+// Compatible OpenAI (et tout service compatible via une URL
+// personnalisée) ou Anthropic. La clé n'est jamais renvoyée au
+// client une fois enregistrée (voir publicSettings).
+// ============================================================
+const https = require('https');
+const httpMod = require('http');
+
+function callExternalAI(aiConfig, systemPrompt, userPrompt) {
+  return new Promise((resolve, reject) => {
+    const provider = aiConfig.provider || 'openai';
+    let urlStr, headers, bodyObj;
+    if (provider === 'anthropic') {
+      urlStr = aiConfig.baseUrl || 'https://api.anthropic.com/v1/messages';
+      headers = { 'x-api-key': aiConfig.apiKey, 'anthropic-version': '2023-06-01' };
+      bodyObj = { model: aiConfig.model || 'claude-3-5-haiku-20241022', max_tokens: 800, system: systemPrompt, messages: [{ role: 'user', content: userPrompt }] };
+    } else {
+      urlStr = aiConfig.baseUrl || 'https://api.openai.com/v1/chat/completions';
+      headers = { 'Authorization': 'Bearer ' + aiConfig.apiKey };
+      bodyObj = { model: aiConfig.model || 'gpt-4o-mini', max_tokens: 800, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userPrompt }] };
+    }
+    let u;
+    try { u = new URL(urlStr); } catch (e) { return reject(new Error('URL du service IA invalide')); }
+    const bodyStr = JSON.stringify(bodyObj);
+    const mod = u.protocol === 'http:' ? httpMod : https;
+    const request = mod.request({
+      hostname: u.hostname, port: u.port || (u.protocol === 'http:' ? 80 : 443), path: u.pathname + u.search, method: 'POST',
+      headers: Object.assign({ 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyStr) }, headers),
+      timeout: 25000
+    }, (res) => {
+      const chunks = [];
+      res.on('data', c => chunks.push(c));
+      res.on('end', () => {
+        const raw = Buffer.concat(chunks).toString('utf8');
+        if (res.statusCode < 200 || res.statusCode >= 300) return reject(new Error('Le service IA a répondu une erreur (' + res.statusCode + ')'));
+        try {
+          const json = JSON.parse(raw);
+          let text = '';
+          if (provider === 'anthropic') text = (json.content && json.content[0] && json.content[0].text) || '';
+          else text = (json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content) || '';
+          resolve((text || '').trim());
+        } catch (e) { reject(new Error('Réponse du service IA illisible')); }
+      });
+    });
+    request.on('error', () => reject(new Error('Impossible de joindre le service IA')));
+    request.on('timeout', () => { request.destroy(); reject(new Error('Le service IA ne répond pas (délai dépassé)')); });
+    request.write(bodyStr);
+    request.end();
+  });
+}
+
+function buildWeeklyPrompt(rapport, analytics) {
+  const lines = [];
+  lines.push(`Chiffre d'affaires encaissé cette semaine : ${fmtLog(rapport.caSemaine)} (semaine précédente : ${fmtLog(rapport.caPrec)}).`);
+  if (rapport.evolution !== null) lines.push(`Évolution par rapport à la semaine précédente : ${rapport.evolution}%.`);
+  lines.push(`Marge brute de la semaine : ${fmtLog(rapport.margeSemaine)} sur ${rapport.nbVentes} vente(s).`);
+  if (rapport.topArticle) lines.push(`Article le plus vendu cette semaine : ${rapport.topArticle.nom} (${fmtLog(rapport.topArticle.montant)}).`);
+  lines.push(`Articles en stock dormant (invendus depuis plus de 30 jours) : ${analytics.stockDormant.length}.`);
+  if (analytics.stockDormant.length) lines.push('Exemples : ' + analytics.stockDormant.slice(0, 5).map(a => a.nom + (a.jamaisVendu ? ' (jamais vendu)' : ` (${a.joursSansVente}j)`)).join(', ') + '.');
+  lines.push(`Ventes à perte cette semaine : ${rapport.ventesAPerteSemaine}.`);
+  if (analytics.ecartsCaisse.recurrent) lines.push(`Des écarts de caisse récurrents ont été détectés ce mois-ci (${analytics.ecartsCaisse.nbAnomalies} fois).`);
+  if (analytics.miseEnAvant.length) lines.push('Articles à forte marge à mettre en avant : ' + analytics.miseEnAvant.slice(0, 3).map(a => `${a.nom} (marge ${a.pctMarge}%)`).join(', ') + '.');
+  if (analytics.saisonnier.length) lines.push('Tendances saisonnières observées sur l\'historique : ' + analytics.saisonnier.slice(0, 3).map(s => `${s.nom} se vend surtout de ${s.periode}`).join(', ') + '.');
+  return lines.join('\n');
+}
+
+const WEEKLY_AI_SYSTEM_PROMPT = "Tu es un conseiller commercial pour une boutique en Côte d'Ivoire. On te donne un résumé chiffré de la semaine écoulée. Rédige une analyse courte (180 mots maximum) en français, structurée en 3 parties : 1) un constat honnête sur la semaine (bon ou mauvais, sans enjoliver), 2) les problèmes les plus importants à corriger en priorité, 3) des recommandations concrètes et actionnables (quels produits mettre en avant, lesquels solder ou à quel prix, quand). Style direct, concret, sans jargon, adapté à un commerçant.";
 
 // ============================================================
 // SERVEUR
@@ -500,7 +761,9 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const hash = hashSecret(body.code || '', data.settings.deleteCodeSalt);
       if (!safeEqual(hash, data.settings.deleteCodeHash)) return sendJSON(res, 403, { ok: false, error: 'Code de suppression incorrect' });
+      const artDel = data.articles.find(a => a.id === id);
       data.articles = data.articles.filter(a => a.id !== id);
+      logJournal(data, 'suppression_article', artDel ? `Article supprimé : ${artDel.nom} (${artDel.code})` : `Article #${id} supprimé`);
       writeData(data);
       return sendJSON(res, 200, { ok: true });
     }
@@ -560,7 +823,9 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const hash = hashSecret(body.code || '', data.settings.deleteCodeSalt);
       if (!safeEqual(hash, data.settings.deleteCodeHash)) return sendJSON(res, 403, { ok: false, error: 'Code de suppression incorrect' });
+      const venteDel = data.ventes.find(v => v.id === id);
       data.ventes = data.ventes.filter(v => v.id !== id);
+      logJournal(data, 'suppression_vente', venteDel ? `Vente supprimée : ${venteDel.article} (${fmtLog(venteDel.prixvente)})` : `Vente #${id} supprimée`);
       writeData(data);
       return sendJSON(res, 200, { ok: true });
     }
@@ -597,7 +862,9 @@ const server = http.createServer(async (req, res) => {
       const id = Number(urlPath.split('/')[3]);
       const body = await readBody(req);
       if (!safeEqual(hashSecret(body.code || '', data.settings.deleteCodeSalt), data.settings.deleteCodeHash)) return sendJSON(res, 403, { ok: false, error: 'Code de suppression incorrect' });
+      const achatDel = data.achats.find(a => a.id === id);
       data.achats = data.achats.filter(a => a.id !== id);
+      logJournal(data, 'suppression_achat', achatDel ? `Achat supprimé : ${achatDel.article} × ${achatDel.quantite} (${achatDel.fournisseur})` : `Achat #${id} supprimé`);
       writeData(data);
       return sendJSON(res, 200, { ok: true });
     }
@@ -633,8 +900,67 @@ const server = http.createServer(async (req, res) => {
       const v = Number(body.montant);
       if (isNaN(v)) return sendJSON(res, 400, { ok: false, error: 'Montant invalide' });
       data.caisseManuelle = v;
+      const calc = computeCaisseCalculee(data);
+      const ecart = v - calc;
+      data.caisseVerifications.push({ date: new Date().toISOString(), calc, reel: v, ecart });
+      if (data.caisseVerifications.length > 500) data.caisseVerifications = data.caisseVerifications.slice(-500);
+      if (Math.abs(ecart) > 1) logJournal(data, 'ecart_caisse', `Écart de caisse détecté : ${fmtLog(ecart)} (calculé ${fmtLog(calc)}, compté ${fmtLog(v)})`);
       writeData(data);
       return sendJSON(res, 200, { ok: true });
+    }
+
+    // ---------- ANALYSE INTELLIGENTE ----------
+    if (urlPath === '/api/analytics' && req.method === 'GET') {
+      const data = readData();
+      if (!requireCaisse(req)) return sendJSON(res, 401, { ok: false, error: 'Non authentifié' });
+      return sendJSON(res, 200, { ok: true, analytics: computeAnalytics(data) });
+    }
+
+    if (urlPath === '/api/analytics/weekly-report' && req.method === 'POST') {
+      const data = readData();
+      if (!requireCaisse(req)) return sendJSON(res, 401, { ok: false, error: 'Non authentifié' });
+      const analytics = computeAnalytics(data);
+      const rapport = computeRapportHebdo(data, analytics);
+      const ai = data.settings.ai || {};
+      if (ai.enabled && ai.apiKey) {
+        try {
+          const resume = await callExternalAI(ai, WEEKLY_AI_SYSTEM_PROMPT, buildWeeklyPrompt(rapport, analytics));
+          return sendJSON(res, 200, { ok: true, rapport, resumeIA: resume, source: 'ia' });
+        } catch (e) {
+          return sendJSON(res, 200, { ok: true, rapport, resumeIA: null, source: 'regle', avertissementIA: e.message });
+        }
+      }
+      return sendJSON(res, 200, { ok: true, rapport, resumeIA: null, source: 'regle' });
+    }
+
+    // ---------- RÉGLAGES IA EXTERNE ----------
+    if (urlPath === '/api/settings/ai' && req.method === 'POST') {
+      const data = readData();
+      if (!requireCaisse(req)) return sendJSON(res, 401, { ok: false, error: 'Non authentifié' });
+      const body = await readBody(req);
+      const ai = data.settings.ai || {};
+      if (typeof body.enabled === 'boolean') ai.enabled = body.enabled;
+      if (body.provider) ai.provider = body.provider;
+      if (typeof body.model === 'string') ai.model = body.model.trim();
+      if (typeof body.baseUrl === 'string') ai.baseUrl = body.baseUrl.trim();
+      if (typeof body.apiKey === 'string' && body.apiKey.trim()) ai.apiKey = body.apiKey.trim();
+      if (body.clearKey) ai.apiKey = '';
+      data.settings.ai = ai;
+      writeData(data);
+      return sendJSON(res, 200, { ok: true, settings: publicSettings(data) });
+    }
+
+    if (urlPath === '/api/settings/ai/test' && req.method === 'POST') {
+      const data = readData();
+      if (!requireCaisse(req)) return sendJSON(res, 401, { ok: false, error: 'Non authentifié' });
+      const ai = data.settings.ai || {};
+      if (!ai.apiKey) return sendJSON(res, 400, { ok: false, error: 'Aucune clé API enregistrée' });
+      try {
+        const reply = await callExternalAI(ai, "Réponds uniquement par le mot OK.", "Confirme la connexion.");
+        return sendJSON(res, 200, { ok: true, reply });
+      } catch (e) {
+        return sendJSON(res, 200, { ok: false, error: e.message });
+      }
     }
 
     // ---------- APP SCAN (téléphone de la commerciale) ----------
@@ -675,6 +1001,50 @@ const server = http.createServer(async (req, res) => {
         vendeur: body.vendeur || ''
       }, 'scan');
       return sendJSON(res, 200, { ok: true, vente: rec, stockRestant: art.stock });
+    }
+
+    // Vente d'un panier complet (plusieurs articles différents, quantités
+    // variables) enregistrée en une seule requête, en tout-ou-rien : soit
+    // tous les articles existent et toutes les lignes sont créées, soit rien
+    // n'est écrit. L'avance totale est répartie ligne par ligne (les
+    // premiers articles du panier sont considérés payés en premier).
+    if (urlPath === '/api/scan/panier' && req.method === 'POST') {
+      if (!checkRateLimit('scanvente:' + ip, 60, 5 * 60 * 1000)) return sendJSON(res, 429, { ok: false, error: 'Trop de requêtes. Patientez un instant.' });
+      const data = readData();
+      if (!requireScan(req, data)) return sendJSON(res, 401, { ok: false, error: 'Appareil non jumelé' });
+      const body = await readBody(req);
+      const items = Array.isArray(body.items) ? body.items : [];
+      if (!items.length) return sendJSON(res, 400, { ok: false, error: 'Le panier est vide' });
+      if (items.length > 50) return sendJSON(res, 400, { ok: false, error: 'Panier trop volumineux (50 articles maximum)' });
+
+      const resolved = [];
+      for (const it of items) {
+        const art = data.articles.find(a => a.code === String(it.code || '').trim());
+        if (!art) return sendJSON(res, 404, { ok: false, error: `Article introuvable pour le code ${it.code}` });
+        const qte = Math.max(1, Number(it.quantite) || 1);
+        const unitPrice = Number(it.prixvente) || art.vente;
+        resolved.push({ art, qte, unitPrice, lineTotal: unitPrice * qte });
+      }
+
+      const grandTotal = resolved.reduce((s, r) => s + r.lineTotal, 0);
+      let avanceRestante = Math.min(Number(body.avance) || 0, grandTotal);
+      const panierId = crypto.randomBytes(6).toString('hex');
+      const dateStr = new Date().toISOString().split('T')[0];
+      const ventesCreated = [];
+      for (const r of resolved) {
+        const ligneAvance = Math.min(avanceRestante, r.lineTotal);
+        avanceRestante -= ligneAvance;
+        const rec = createVente(data, {
+          date: dateStr, article: r.art.nom, articleCode: r.art.code,
+          client: body.client || '', tel: body.tel || '',
+          prixvente: r.lineTotal, prixachat: r.art.achat * r.qte, depcolis: 0,
+          avance: ligneAvance, lieu: body.lieu || '', comment: body.comment || '',
+          vendeur: body.vendeur || '', quantite: r.qte, panierId
+        }, 'scan');
+        ventesCreated.push(rec);
+      }
+      const avanceTotal = ventesCreated.reduce((s, v) => s + v.avance, 0);
+      return sendJSON(res, 200, { ok: true, panierId, ventes: ventesCreated, total: grandTotal, avanceTotal, resteTotal: grandTotal - avanceTotal });
     }
 
     if (urlPath === '/api/scan/today' && req.method === 'GET') {
